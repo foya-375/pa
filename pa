@@ -1,0 +1,71 @@
+#!/bin/bash
+
+# usage accept a parameter that represent the return code of current program,
+# usage() will terminate the program with the given return code.
+usage() {
+  printf "Usage: $(basename $0) -n <param>\n"
+  printf "  -n <param>    Specify the program name (required).\n"
+  printf "  -h            Print help message like this\n"
+  printf "Example:\n"
+  printf "  $(basename $0) -n my_program\n"
+  exit $1
+}
+
+# use getopt to get all the options, make sure it is successfully executed
+opt_parser=$(getopt -o 'n:h' -- "$@")
+if [ $? -ne 0 ]; then usage; fi
+
+eval set -- "$opt_parser"
+unset opt_parser
+
+while true; do
+  case "$1" in
+    '-n')
+      prog_name="$2"
+      shift 2
+    ;;
+    '-h')
+      usage 0
+    ;;
+    '--')
+      shift; break
+    ;;
+    '*')
+      usage 1
+  esac
+done
+
+# check if any progress is given
+[ -v prog_name ] || {
+  printf "\033[33;1mYou must specify a progress to be executed\033[0m\n\n"
+  usage 1
+}
+
+python_output=$(python3 $(dirname "$(realpath "$0")")/config.py $prog_name 2>&1)
+python_exit_code=$?
+
+# if python script has failed, just print the output of it, then abort
+if [[ $python_exit_code -ne 0 ]]; then
+  printf "\033[31;1m$python_output\033[0m\n"
+  exit 1
+fi
+
+IFS=$'\n' read -r -d '' -a command_array <<< "$python_output"
+
+# open a subshell, restore all the environment variables system-wide, then execute the command
+# of this progress command-by-command
+(
+  export PATH="/usr/bin:/bin:$PATH" 
+
+  printf "\033[33;1mChanging working directory to ${command_array}...\n"
+  cd "$(eval echo $command_array)"
+
+  for cmd in "${command_array[@]:1}"; do
+    printf "\033[35;1m=> Executing: $cmd\033[31;0m\n"
+    eval "$cmd" || {
+      printf "\033[31;1mError executing command:[$cmd], abort...\033[31;0m\n"
+      exit 1
+    }
+  done
+  printf "\033[32;1m=> Progress '$prog_name' Done!\033[31;0m\n"
+)
