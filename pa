@@ -6,7 +6,7 @@ usage() {
   printf "Usage: $(basename $BASH_SOURCE) -n <param>\n"
   printf "  -n <param>    Specify the progress name (required). If no more argument is given, \n"
   printf "  -e            Execute the specified progress chosen by pattern -n\n"
-  printf "  -d <param>    Switch to that dir which progress <param>\n"
+  printf "  -d            Switch to that dir which progress <param>\n"
   printf "  -h            Print help message like this\n"
   printf "Example:\n"
   printf "  $(basename $BASH_SOURCE) -n my_program -e -d [Execute my_program progress and then switch to that directory.]\n"
