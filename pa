@@ -3,102 +3,92 @@
 # usage accept a parameter that represent the return code of current program,
 # usage() will terminate the program with the given return code.
 usage() {
-  printf "Usage: $(basename $BASH_SOURCE) -n <param>\n"
-  printf "  -n <param>    Specify the progress name (required). If no more argument is given, \n"
-  printf "  -e            Execute the specified progress chosen by pattern -n\n"
-  printf "  -d            Switch to that dir which progress <param>\n"
-  printf "  -h            Print help message like this\n"
-  printf "Example:\n"
-  printf "  $(basename $BASH_SOURCE) -n my_program -e -d [Execute my_program progress and then switch to that directory.]\n"
+	printf "Usage: $(basename $BASH_SOURCE) -n <param>\n"
+	printf "\t-n <param>    Specify the progress name (required). If no more argument is given, \n"
+	printf "\t-e            Execute the specified progress chosen by pattern -n\n"
+	printf "\t-d            Switch to that dir which progress <param>\n"
+	printf "\t-h            Print help message like this\n"
+	printf "Example:\n"
+	printf "\t$(basename $BASH_SOURCE) -n my_program -e -d [Execute my_program progress and then switch to that directory.]\n"
 }
 
 pa_main() {
-  # use getopt to get all the options, make sure it is successfully executed
-  local opt_parser=$(getopt -o 'n:edh' -- "$@")
-  if [ $? -ne 0 ]; then usage; fi
+	local prog_name=
+	local exec_prog=false
+	local switch_to_dir=false
 
-  eval set -- "$opt_parser"
-  unset opt_parser
+	# use getopt to get all the options, make sure it is successfully executed
+	OPTIND=1
+	while getopts ":n:edh" opt; do
+		case "$opt" in
+		n) prog_name="$OPTARG" ;;
+		e) exec_prog=true      ;;
+		d) switch_to_dir=true  ;;
+		h) usage && return 1   ;;
+		:)
+			printf "\033[31;1mOption -$OPTARG requires an progress\033[0m\n"
+			usage
+			return 1
+			;;
+		*)
+			printf "\033[31;1mInvalid option: -$OPTARG\033[0m\n"
+			usage
+			return 1
+			;;
+		esac
+	done
+	shift $((OPTIND - 1))
 
-  local prog_name=
-  local exec_prog=false
-  local switch_to_dir=false
+	# check if any progress is given
+	[ ! -z "$prog_name" ] || {
+		printf "\033[33;1mYou must specify a progress to be executed\033[0m\n"
+		usage
+		return 1
+	}
 
-  while true; do
-    case "$1" in
-      '-n')
-        prog_name="$2"
-        shift 2
-      ;;
-      '-e')
-        exec_prog=true
-        shift 1
-      ;;
-      '-d')
-        switch_to_dir=true
-        shift 1
-      ;;
-      '-h')
-        usage; return 0
-      ;;
-      '--')
-        shift; break
-      ;;
-      '*')
-        usage; return 1
-    esac
-  done
+	if [ $exec_prog = false ] && [ $switch_to_dir = false ]; then
+		exec_prog=true
+	fi
 
-  # check if any progress is given
-  [ ! -z "$prog_name" ] || {
-    printf "\033[33;1mYou must specify a progress to be executed\033[0m\n\n"
-    usage
-    return 1
-  }
+	# Execute the python script and obtain its return code
+	local python_output
+	python_output=$(python3 $(dirname "$(realpath "$BASH_SOURCE")")/config.py $prog_name 2>&1)
+	local python_exit_code=$?
 
-  if [ $exec_prog = false ] && [ $switch_to_dir = false ]; then
-    exec_prog=true
-  fi
+	# if python script has failed, just print the output of it, then abort
+	if [[ $python_exit_code -ne 0 ]]; then
+		printf "\033[31;1m$python_output\033[0m\n"
+		return 1
+	fi
 
-  # Execute the python script and obtain its return code
-  local python_output
-  python_output=$(python3 $(dirname "$(realpath "$BASH_SOURCE")")/config.py $prog_name 2>&1)
-  local python_exit_code=$?
+	IFS=$'\n' read -r -d '' -a command_array <<<"$python_output"
 
-  # if python script has failed, just print the output of it, then abort
-  if [[ $python_exit_code -ne 0 ]]; then
-    printf "\033[31;1m$python_output\033[0m\n"
-    return 1
-  fi
+	# open a subshell, restore all the environment variables system-wide, then execute the command
+	# of this progress command-by-command
+	if [ $exec_prog = true ]; then
+		(
+			export PATH="/usr/bin:/bin:$PATH"
 
-  IFS=$'\n' read -r -d '' -a command_array <<< "$python_output"
+			printf "\033[33;1mChanging working directory to ${command_array}...\n"
+			cd "$(eval echo $command_array)"
 
-  # open a subshell, restore all the environment variables system-wide, then execute the command
-  # of this progress command-by-command
-  if [ $exec_prog = true ]; then
-    (
-      export PATH="/usr/bin:/bin:$PATH"
+			for cmd in "${command_array[@]:1}"; do
+				printf "\033[35;1m=> Executing: $cmd\033[31;0m\n"
+				eval "$cmd" || {
+					printf "\033[31;1mError executing command:[$cmd], abort...\033[31;0m\n"
+					return 1
+				}
+			done
+			printf "\033[32;1m=> Progress '$prog_name' Done!\033[31;0m\n"
+		)
+	fi
 
-      printf "\033[33;1mChanging working directory to ${command_array}...\n"
-      cd "$(eval echo $command_array)"
+	if [ $switch_to_dir = true ]; then
+		printf "\033[32;1m=> You are now in ${command_array}.\n\033[0m"
+		cd "$(eval echo $command_array)"
+	fi
 
-      for cmd in "${command_array[@]:1}"; do
-        printf "\033[35;1m=> Executing: $cmd\033[31;0m\n"
-        eval "$cmd" || {
-          printf "\033[31;1mError executing command:[$cmd], abort...\033[31;0m\n"
-          return 1
-        }
-      done
-      printf "\033[32;1m=> Progress '$prog_name' Done!\033[31;0m\n"
-    )
-  fi
-
-  if [ $switch_to_dir = true ]; then
-    printf "\033[32;1m=> You are now in ${command_array}.\n\033[0m"
-    cd "$(eval echo $command_array)"
-  fi
-
-  unset IFS
+	unset IFS
 }
 
 pa_main "$@" # call main right here
